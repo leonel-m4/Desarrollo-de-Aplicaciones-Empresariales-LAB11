@@ -1,26 +1,61 @@
 import { useCallback, useEffect, useState } from "react";
 
+// Qué debe hacer:
+//   usePlans(fetchPlans) recibe una función que devuelve una promesa de planes (en la app es
+//   `fetchPlans` de src/lib/api.js, que simula la red) y devuelve:
+//
+//     { status, plans, error, reload }
+//
+//   · status: "loading" | "ready" | "error".
+//   · plans:  [] mientras carga y si falla; el arreglo recibido cuando llega bien.
+//   · error:  null salvo en "error", donde es el error con el que falló la promesa.
+//   · reload(): vuelve a pedir los planes. El estado vuelve a "loading" (plans [] y error null).
+//
+// Reglas:
+//   1. Pide los planes al montar y cada vez que cambie `fetchPlans` o se llame a reload().
+//      Quien llama pasa una función ESTABLE (no una nueva en cada dibujado), si no el efecto no terminaría nunca.
+//   2. Resuelve los TRES estados: si la promesa se rechaza, el estado es "error" (no se queda en "loading").
+//   3. IGNORA LA RESPUESTA VIEJA: si el efecto se repitió (reload) o el componente se desmontó antes de que
+//      llegue una respuesta, esa respuesta no puede tocar el estado. Una carrera de peticiones es un error
+//      de verdad: la respuesta lenta de antes pisaría a la nueva.
+//
+// Pistas:
+//   · useState para el estado; un segundo useState (un contador) para forzar la repetición en reload().
+//   · useEffect con la dependencia correcta. Dentro: `let cancelled = false;`, pide los datos, y en los
+//     dos caminos (.then ok y error) mira `if (!cancelled)` antes de guardar. La LIMPIEZA pone cancelled = true.
+//   · useCallback para que reload tenga siempre la misma identidad.
 export default function usePlans(fetchPlans) {
-  const [plans, setPlans] = useState([]);
-  const [status, setStatus] = useState("loading");
-  const [error, setError] = useState(null);
-  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState({ status: "loading", plans: [], error: null });
+  const [reloadCount, setReloadCount] = useState(0);
+
+  const reload = useCallback(() => {
+    setReloadCount((count) => count + 1);
+  }, []);
 
   useEffect(() => {
-    setPlans([]);
-    setStatus("loading");
-    setError(null);
-    fetchPlans()
-      .then((data) => {
-        setPlans(data);
-        setStatus("ready");
-      })
-      .catch((err) => {
-        console.error("Error loading plans", err);
-      });
-  }, [fetchPlans, attempt]);
+    let cancelled = false;
 
-  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+    setState({ status: "loading", plans: [], error: null });
 
-  return { status, plans, error, reload };
+    async function loadPlans() {
+      try {
+        const plans = await fetchPlans();
+        if (!cancelled) {
+          setState({ status: "ready", plans, error: null });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setState({ status: "error", plans: [], error });
+        }
+      }
+    }
+
+    loadPlans();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPlans, reloadCount]);
+
+  return { ...state, reload };
 }
