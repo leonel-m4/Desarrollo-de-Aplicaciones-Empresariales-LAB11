@@ -1,5 +1,5 @@
-// TODO (useAgentRun) — la máquina de estados de la ejecución de un plan.
-//
+import { useCallback, useEffect, useRef, useState } from "react";
+
 // Qué debe hacer:
 //   useAgentRun(runAgent) devuelve:
 //
@@ -38,16 +38,81 @@
 //     start/approve/reject sin depender de un dibujado.
 //   · Toda respuesta tardía se comprueba con `signal.aborted` antes de tocar el estado.
 //   · Un useEffect sin dependencias ([]) cuya limpieza aborta el controlador: es lo que corre al desmontar.
-//
-// Hoy este hook no hace nada: se queda en "idle". Ejecuta `npm test -- useAgentRun` y mira qué falla.
 export default function useAgentRun(runAgent) {
-  return {
+  const [state, setState] = useState({
     status: "idle",
     plan: null,
     result: null,
     error: null,
-    start: () => {},
-    approve: () => {},
-    reject: () => {},
-  };
+  });
+  const stateRef = useRef(state);
+  const controllerRef = useRef(null);
+
+  const transition = useCallback((nextState) => {
+    // Keep event guards current even before React renders the next state.
+    stateRef.current = nextState;
+    setState(nextState);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.abort();
+    };
+  }, []);
+
+  const start = useCallback((plan) => {
+    const currentStatus = stateRef.current.status;
+    if (
+      typeof runAgent !== "function" ||
+      currentStatus === "running" ||
+      currentStatus === "awaiting_approval"
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    transition({ status: "running", plan, result: null, error: null });
+
+    async function execute() {
+      try {
+        const result = await runAgent(plan, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+
+        transition({
+          status: plan.risk === "R2" ? "awaiting_approval" : "done",
+          plan,
+          result,
+          error: null,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        transition({ status: "error", plan, result: null, error });
+      } finally {
+        if (controllerRef.current === controller) {
+          controllerRef.current = null;
+        }
+      }
+    }
+
+    execute();
+  }, [runAgent, transition]);
+
+  const approve = useCallback(() => {
+    if (stateRef.current.status !== "awaiting_approval") return;
+
+    transition({ ...stateRef.current, status: "done" });
+  }, [transition]);
+
+  const reject = useCallback(() => {
+    const currentStatus = stateRef.current.status;
+    if (currentStatus !== "running" && currentStatus !== "awaiting_approval") return;
+
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    transition({ status: "idle", plan: null, result: null, error: null });
+  }, [transition]);
+
+  return { ...state, start, approve, reject };
 }

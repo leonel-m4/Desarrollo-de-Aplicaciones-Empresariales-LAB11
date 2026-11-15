@@ -1,5 +1,5 @@
-// TODO (useDebounce) — escribe tu primer hook propio.
-//
+import { useEffect, useState } from "react";
+
 // Qué debe hacer:
 //   useDebounce(value, delay) devuelve el valor "tranquilo": el último `value` que lleva `delay` ms sin cambiar.
 //
@@ -15,9 +15,16 @@
 //   · setTimeout/clearTimeout van en un useEffect cuyas dependencias son [value, delay].
 //   · La función que devuelve el useEffect es la LIMPIEZA: React la ejecuta antes de repetir el efecto
 //     y al desmontar. Ahí se cancela el temporizador.
-//
-// Hoy este hook devuelve el valor sin esperar nada: por eso fallan sus pruebas.
-// Ejecuta `npm test -- useDebounce` y mira cuáles.
 export default function useDebounce(value, delay) {
-  return value;
+  const [debouncedValue, setDebouncedValue] = useState(() => value);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedValue(() => value);
+    }, delay);
+
+    return () => clearTimeout(timeoutId);
+  }, [value, delay]);
+
+  return debouncedValue;
 }
